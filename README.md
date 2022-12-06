@@ -9,17 +9,17 @@ The for loop runs seven times. During each iteration the transaction modifies a 
 
 # Table of contents
 
-[Introduction](#introduction)
+1. [Introduction](#introduction)
 
-[Basic loop](#basic-loop)
+2. [Basic loop](#basic-loop)
 
-[Programmable loop](#programmable-loop)
+3. [Programmable loop](#programmable-loop)
 
-[Minor fixes](#minor-fixes)
+4. [Minor fixes](#minor-fixes)
 
-[Final product](#final-product)
+5. [Final product](#final-product)
 
-[Conclusion](#conclusion)
+6. [Conclusion](#conclusion)
 
 # Introduction
 
@@ -37,6 +37,8 @@ Below I provide an implementation of a for loop in bitcoin script using a constr
 If you pass this virtual machine a tape of 9 bits containing a set of instructions, the virtual machine will execute the instructions on the tape, including the ability to loop by running an instruction that tells it to shift left a certain number of bits, where it encounters another instruction telling it go back where it was and run the first instruction again. If your script doesn’t modify the tape in between those two instructions, it can get stuck in a loop until it consumes all of the virtual machine’s resources, or, if it does modify the tape, you can get it out of the loop after performing one or more functions a limited number of times repeatedly.
 
 The following script is an example of a loop that repeats one time before consuming all of the virtual machine’s resources. It starts off at position 9 on a tape, where it is instructed to go to position 3, where it is instructed to return to position 9, then it loops by following the same sequence of instructions again: it goes to position 3 (based on the instruction at position 9) and then (following the instruction at position 3) it goes back to position 9 again. This basic version does not perform any modifications to the tape so after performing its loop it will halt and crash the virtual machine, which means it cannot be used in a real bitcoin transaction.
+
+[(Click here to skip the code and go to the next section)](#programmable-loop)
 
 # Basic loop
 
@@ -284,6 +286,8 @@ OP_ENDIF
 # Programmable loop
 
 But we can do better. Instruction 000 currently says to go to position 3 and instruction 001 currently says to go to position 9. Suppose instruction 001 says, instead, to convert the 3 bits at position 6 to a number, and if that number is more than 0, reduce it by 1, then go to position 9. That will allow us to program how many loops we want to use, bounded only by the size of the virtual machine. What follows is an implementation. Note that it is much longer than the previous one because I expanded the size of the virtual machine in order to allow for a greater number of loops. This version has an upper bound of 7 loops.
+
+[(Click here to skip the code and go to the next section)](#minor-fixes)
 
 ```
 //first pass in the tape
@@ -3315,6 +3319,8 @@ Second, after looping 7 times, there is an instruction to “clean up the stack 
 The third issue is this. If the tape instructs the virtual machine to loop fewer than 7 times, it will leave a single 1 on the stack before the virtual machine is done processing the tape. So the virtual machine will try to continue processing the tape even though there is only a single 1 where the tape used to be. In fact, it will try to run a function called OP_3DUP on that 1, which will cause an error because OP_3DUP requires at least 3 items to be on the stack, not just 1. To prevent that, let’s wrap every copy of the virtual machine’s instruction set in IF tags that only activate if the number of items on the stack is greater than 1.
 
 After making these changes, the virtual machine always starts operating on the "end" of the tape, at position 9. Its first action is to convert the 3 bits at the rightmost end of the tape (i.e. bits 7, 8, and 9) into a decimal number, remaining at position 9 while it does so. Suppose those bits convert to the number 0. The witness program says that if the number is 0 then do this: "shift the tape left 6 bits and follow the instruction there." So it moves to position 3 on the tape. It converts the 3 bits at positions 0, 1, and 2, which (let's suppose) convert to the number 1. The witness program says that if the number is 1, then do this: "If the middle 6 bits convert to a number greater than 0, decrement them, shift the tape right 6 bits, and follow the instruction there; otherwise, clean up the stack and end with a true value." The middle bits (as programmed by the programmer) can be any number up to 7. In the example below, I use 7. So the program decrements 7 to 6, returns to position 9 and converts the 3 bits there, which still say to go to position 3, which still says to decrement the middle bits and return to position 9, etc. It keeps doing that until the middle bits convert to the number 0, at which point the program exits with a true value, allowing you to take your money.
+
+[(Click here to skip the code and go to the next section)](#conclusion)
 
 # Final product
 
