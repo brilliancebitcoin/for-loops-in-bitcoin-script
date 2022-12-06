@@ -7,6 +7,20 @@ The following transaction on bitcoin’s testnet blockchain demonstrates that it
 
 The for loop runs seven times. During each iteration the transaction modifies a set of data provided as input to the transaction. After seven loops, it terminates with a true value and lets the user spend their money.
 
+# Table of contents
+
+[Introduction](#introduction)
+
+[Basic loop](#basic-loop)
+
+[Programmable loop](#programmable-loop)
+
+[Minor fixes](#minor-fixes)
+
+[Final product](#final-product)
+
+[Conclusion](#conclusion)
+
 # Introduction
 
 People who develop bitcoin applications are probably familiar with the common observation that bitcoin script is not a turing-complete programming language and does not have loops. This is shorthand for saying bitcoin does not have *unbounded* loops, that is, all functions written in bitcoin script are guaranteed to “halt” at some point and either return a value or return an error, whereas an unbounded loop might never halt, it might get stuck repeating an action forever.
