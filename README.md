@@ -1,2 +1,3559 @@
-# for-loops-in-bitcoin-script
+# For loops in bitcoin script
 An implementation of a bounded-memory turing machine in bitcoin script and a demonstration of a for loop with 7 iterations
+
+# TLDR
+
+The following transaction on bitcoin’s testnet blockchain demonstrates that it is possible to execute a “for” loop in bitcoin script: https://blockstream.info/testnet/tx/a9bdc7db7c722d4d3cf9689510aa7817a611855e6367bbd5b58b30388fbca8aa?expand
+
+The for loop runs seven times. During each iteration the transaction modifies a set of data provided as input to the transaction. After seven loops, it terminates with a true value and lets the user spend their money.
+
+# Introduction
+
+People who develop bitcoin applications are probably familiar with the common observation that bitcoin script is not a turing-complete programming language and does not have loops. This is shorthand for saying bitcoin does not have *unbounded* loops, that is, all functions written in bitcoin script are guaranteed to “halt” at some point and either return a value or return an error, whereas an unbounded loop might never halt, it might get stuck repeating an action forever.
+
+Unbounded loops are not the most common types of loops used by programmers. (In fact they are quite dangerous and often avoided wherever possible.) Programmers usually use “for” loops instead, or bounded loops, which repeatedly apply some lines of code a certain number of times and then move on to the next lines. It has long been known that it is at least theoretically possible to implement a “for” loop in bitcoin script.
+
+For example, these two forum threads (from 2021 and 2022) point out that it is at least possible in theory, though as far as I know no one has actually done it yet: https://bitcoin.stackexchange.com/questions/111337/loops-in-bitcoin-scripting/
+https://www.quora.com/Since-Bitcoin-is-not-Turing-complete-does-this-mean-no-for-loops-or-loops-of-any-kind-is-allowed-in-the-bitcoin-core-codebase
+
+Below I provide an implementation of a for loop in bitcoin script using a construct that emulates a bounded-depth turing machine. To do this, I built a virtual machine in bitcoin script that can perform one of 8 actions depending on the value of 3 binary digits it reads from a tape (an array of stack elements). Actions it can perform include: shift the tape left, shift the tape right, read the next instruction (i.e. the next 3 digits), and modify the tape. Shifting the tape right is done by moving things to the alt stack and shifting it left is done by getting things from the alt stack.
+
+![](https://cdn-wordpress-info.futurelearn.com/info/wp-content/uploads/Turing_machines_03-1.gif)
+
+If you pass this virtual machine a tape of 9 bits containing a set of instructions, the virtual machine will execute the instructions on the tape, including the ability to loop by running an instruction that tells it to shift left a certain number of bits, where it encounters another instruction telling it go back where it was and run the first instruction again. If your script doesn’t modify the tape in between those two instructions, it can get stuck in a loop until it consumes all of the virtual machine’s resources, or, if it does modify the tape, you can get it out of the loop after performing one or more functions a limited number of times repeatedly.
+
+The following script is an example of a loop that repeats one time before consuming all of the virtual machine’s resources. It starts off at position 9 on a tape, where it is instructed to go to position 3, where it is instructed to return to position 9, then it loops by following the same sequence of instructions again: it goes to position 3 (based on the instruction at position 9) and then (following the instruction at position 3) it goes back to position 9 again. This basic version does not perform any modifications to the tape so after performing its loop it will halt and crash the virtual machine, which means it cannot be used in a real bitcoin transaction.
+
+# Basic loop
+
+```
+//first pass in the tape
+<0>
+<0>
+<1>
+<1>
+<1>
+<1>
+<0>
+<0>
+<0>
+//process instruction
+OP_3DUP
+OP_2DUP
+OP_BOOLAND
+OP_IF
+  OP_2DROP
+  OP_3
+OP_ELSE
+  OP_IF
+      OP_1
+      OP_SWAP
+      OP_DROP
+  OP_ELSE
+      OP_IF
+          OP_2
+      OP_ELSE
+          OP_0
+      OP_ENDIF
+  OP_ENDIF
+OP_ENDIF
+OP_SWAP
+OP_IF
+  OP_4
+OP_ELSE
+  OP_0
+OP_ENDIF
+OP_ADD
+//if 0, shift left by 6
+OP_DUP
+OP_0
+OP_EQUAL
+OP_IF
+   OP_DROP
+   OP_TOALTSTACK
+   OP_TOALTSTACK
+   OP_TOALTSTACK
+   OP_TOALTSTACK
+   OP_TOALTSTACK
+   OP_TOALTSTACK
+OP_ELSE
+OP_DUP
+OP_IF
+//if 1, shift right by 6
+OP_DUP
+OP_1
+OP_EQUAL
+OP_IF
+   OP_DROP
+   OP_FROMALTSTACK
+   OP_FROMALTSTACK
+   OP_FROMALTSTACK
+   OP_FROMALTSTACK
+   OP_FROMALTSTACK
+   OP_FROMALTSTACK
+OP_ENDIF
+OP_ENDIF
+OP_ENDIF
+//process instruction
+OP_3DUP
+OP_2DUP
+OP_BOOLAND
+OP_IF
+  OP_2DROP
+  OP_3
+OP_ELSE
+  OP_IF
+      OP_1
+      OP_SWAP
+      OP_DROP
+  OP_ELSE
+      OP_IF
+          OP_2
+      OP_ELSE
+          OP_0
+      OP_ENDIF
+  OP_ENDIF
+OP_ENDIF
+OP_SWAP
+OP_IF
+  OP_4
+OP_ELSE
+  OP_0
+OP_ENDIF
+OP_ADD
+//if 0, shift left by 6
+OP_DUP
+OP_0
+OP_EQUAL
+OP_IF
+   OP_DROP
+   OP_TOALTSTACK
+   OP_TOALTSTACK
+   OP_TOALTSTACK
+   OP_TOALTSTACK
+   OP_TOALTSTACK
+   OP_TOALTSTACK
+OP_ELSE
+OP_DUP
+OP_IF
+//if 1, shift right by 6
+OP_DUP
+OP_1
+OP_EQUAL
+OP_IF
+   OP_DROP
+   OP_FROMALTSTACK
+   OP_FROMALTSTACK
+   OP_FROMALTSTACK
+   OP_FROMALTSTACK
+   OP_FROMALTSTACK
+   OP_FROMALTSTACK
+OP_ENDIF
+OP_ENDIF
+OP_ENDIF
+//process instruction
+OP_3DUP
+OP_2DUP
+OP_BOOLAND
+OP_IF
+  OP_2DROP
+  OP_3
+OP_ELSE
+  OP_IF
+      OP_1
+      OP_SWAP
+      OP_DROP
+  OP_ELSE
+      OP_IF
+          OP_2
+      OP_ELSE
+          OP_0
+      OP_ENDIF
+  OP_ENDIF
+OP_ENDIF
+OP_SWAP
+OP_IF
+  OP_4
+OP_ELSE
+  OP_0
+OP_ENDIF
+OP_ADD
+//if 0, shift left by 6
+OP_DUP
+OP_0
+OP_EQUAL
+OP_IF
+   OP_DROP
+   OP_TOALTSTACK
+   OP_TOALTSTACK
+   OP_TOALTSTACK
+   OP_TOALTSTACK
+   OP_TOALTSTACK
+   OP_TOALTSTACK
+OP_ELSE
+OP_DUP
+OP_IF
+//if 1, shift right by 6
+OP_DUP
+OP_1
+OP_EQUAL
+OP_IF
+   OP_DROP
+   OP_FROMALTSTACK
+   OP_FROMALTSTACK
+   OP_FROMALTSTACK
+   OP_FROMALTSTACK
+   OP_FROMALTSTACK
+   OP_FROMALTSTACK
+OP_ENDIF
+OP_ENDIF
+OP_ENDIF
+//process instruction
+OP_3DUP
+OP_2DUP
+OP_BOOLAND
+OP_IF
+  OP_2DROP
+  OP_3
+OP_ELSE
+  OP_IF
+      OP_1
+      OP_SWAP
+      OP_DROP
+  OP_ELSE
+      OP_IF
+          OP_2
+      OP_ELSE
+          OP_0
+      OP_ENDIF
+  OP_ENDIF
+OP_ENDIF
+OP_SWAP
+OP_IF
+  OP_4
+OP_ELSE
+  OP_0
+OP_ENDIF
+OP_ADD
+//if 0, shift left by 6
+OP_DUP
+OP_0
+OP_EQUAL
+OP_IF
+   OP_DROP
+   OP_TOALTSTACK
+   OP_TOALTSTACK
+   OP_TOALTSTACK
+   OP_TOALTSTACK
+   OP_TOALTSTACK
+   OP_TOALTSTACK
+OP_ELSE
+OP_DUP
+OP_IF
+//if 1, shift right by 6
+OP_DUP
+OP_1
+OP_EQUAL
+OP_IF
+   OP_DROP
+   OP_FROMALTSTACK
+   OP_FROMALTSTACK
+   OP_FROMALTSTACK
+   OP_FROMALTSTACK
+   OP_FROMALTSTACK
+   OP_FROMALTSTACK
+OP_ENDIF
+OP_ENDIF
+OP_ENDIF
+```
+
+# Programmable loop
+
+But we can do better. Instruction 000 currently says to go to position 3 and instruction 001 currently says to go to position 9. Suppose instruction 001 says, instead, to convert the 3 bits at position 6 to a number, and if that number is more than 0, reduce it by 1, then go to position 9. That will allow us to program how many loops we want to use, bounded only by the size of the virtual machine. What follows is an implementation. Note that it is much longer than the previous one because I expanded the size of the virtual machine in order to allow for a greater number of loops. This version has an upper bound of 7 loops.
+
+```
+
+```
+
+# Minor fixes
+
+There are three minor issues with this script. First, someone can pass in a tape longer than 9 bits, which might crash the virtual machine, or they might pass in a tape containing things other than 1s and 0s, which might do the same thing. Let’s fix that by putting some verification functions at the beginning of our virtual machine to ensure the tape is 9 bits long and has only 1s and 0s on it.
+
+Second, after looping 7 times, there is an instruction to “clean up the stack and return true,” but that is not implemented, instead it just outputs the word “yay!” onto the blockchain. Let’s implement the cleanup. We know the tape can only ever be 9 bits because of the change introduced in the first paragraph of this section, and we know that, at the point where the virtual machine checks if it is done looping, we have a number 0 on the stack that represents the middle 3 bits (which were removed for processing), and we know that we are at position 3 of the tape. So let’s clean up the stack by removing the number, then shifting the tape all the way to the left so that we are at the rightmost position with 6 bits behind us (it would be 9 but remember, the three central 3 bits were removed for processing), then remove those 6 bits, deposit a 1, and end the script.
+
+The third issue is this. If the tape instructs the virtual machine to loop fewer than 7 times, it will leave a single 1 on the stack before the virtual machine is done processing the tape. So the virtual machine will try to continue processing the tape even though there is only a single 1 where the tape used to be. In fact, it will try to run a function called OP_3DUP on that 1, which will cause an error because OP_3DUP requires at least 3 items to be on the stack, not just 1. To prevent that, let’s wrap every copy of the virtual machine’s instruction set in IF tags that only activate if the number of items on the stack is greater than 1.
+
+After making these changes, the virtual machine always starts operating on the "end" of the tape, at position 9. Its first action is to convert the 3 bits at the rightmost end of the tape (i.e. bits 7, 8, and 9) into a decimal number, remaining at position 9 while it does so. Suppose those bits convert to the number 0. The witness program says that if the number is 0 then do this: "shift the tape left 6 bits and follow the instruction there." So it moves to position 3 on the tape. It converts the 3 bits at positions 0, 1, and 2, which (let's suppose) convert to the number 1. The witness program says that if the number is 1, then do this: "If the middle 6 bits convert to a number greater than 0, decrement them, shift the tape right 6 bits, and follow the instruction there; otherwise, clean up the stack and end with a true value." The middle bits (as programmed by the programmer) can be any number up to 7. In the example below, I use 7. So the program decrements 7 to 6, returns to position 9 and converts the 3 bits there, which still say to go to position 3, which still says to decrement the middle bits and return to position 9, etc. It keeps doing that until the middle bits convert to the number 0, at which point the program exits with a true value, allowing you to take your money.
+
+# Final product
+
+```
+//first pass in the tape
+<0>
+<0>
+<1>
+<1>
+<1>
+<1>
+<0>
+<0>
+<0>
+//verify the tape is the right size
+OP_DEPTH
+OP_9
+OP_EQUALVERIFY
+//verify the tape consists only of 1s and 0s
+OP_DUP
+OP_SIZE
+OP_EQUALVERIFY
+OP_TOALTSTACK
+OP_DUP
+OP_SIZE
+OP_EQUALVERIFY
+OP_TOALTSTACK
+OP_DUP
+OP_SIZE
+OP_EQUALVERIFY
+OP_TOALTSTACK
+OP_DUP
+OP_SIZE
+OP_EQUALVERIFY
+OP_TOALTSTACK
+OP_DUP
+OP_SIZE
+OP_EQUALVERIFY
+OP_TOALTSTACK
+OP_DUP
+OP_SIZE
+OP_EQUALVERIFY
+OP_TOALTSTACK
+OP_DUP
+OP_SIZE
+OP_EQUALVERIFY
+OP_TOALTSTACK
+OP_DUP
+OP_SIZE
+OP_EQUALVERIFY
+OP_TOALTSTACK
+OP_DUP
+OP_SIZE
+OP_EQUALVERIFY
+OP_FROMALTSTACK
+OP_FROMALTSTACK
+OP_FROMALTSTACK
+OP_FROMALTSTACK
+OP_FROMALTSTACK
+OP_FROMALTSTACK
+OP_FROMALTSTACK
+OP_FROMALTSTACK
+//process instruction
+OP_DEPTH
+OP_1
+OP_GREATERTHAN
+OP_IF
+   OP_3DUP
+   OP_2DUP
+   OP_BOOLAND
+   OP_IF
+     OP_2DROP
+     OP_3
+   OP_ELSE
+     OP_IF
+         OP_1
+         OP_SWAP
+         OP_DROP
+     OP_ELSE
+         OP_IF
+             OP_2
+         OP_ELSE
+             OP_0
+         OP_ENDIF
+     OP_ENDIF
+   OP_ENDIF
+   OP_SWAP
+   OP_IF
+     OP_4
+   OP_ELSE
+     OP_0
+   OP_ENDIF
+   OP_ADD
+   //if 0, shift left by 6
+   OP_DUP
+   OP_0
+   OP_EQUAL
+   OP_IF
+      OP_DROP
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+   OP_ELSE
+   OP_DUP
+   OP_IF
+   //if 1, convert the next 3 bits to a number, and if that number is more 0, reduce it by 1, then shift right by 6 bits, otherwise clean up the stack and return true
+   OP_DUP
+   OP_1
+   OP_EQUAL
+   OP_IF
+      //convert the next 3 bits to a number
+      OP_DROP
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_2DUP
+      OP_BOOLAND
+      OP_IF
+      OP_2DROP
+      OP_3
+      OP_ELSE
+      OP_IF
+          OP_1
+          OP_SWAP
+          OP_DROP
+      OP_ELSE
+          OP_IF
+              OP_2
+          OP_ELSE
+              OP_0
+          OP_ENDIF
+      OP_ENDIF
+      OP_ENDIF
+      OP_SWAP
+      OP_IF
+      OP_4
+      OP_ELSE
+      OP_0
+      OP_ENDIF
+      OP_ADD
+      //if greater than 0, subtract 1, convert the number to bits, then shift right by 6 bits
+      OP_DUP
+      OP_0
+      OP_GREATERTHAN
+      OP_IF
+          //subtract 1
+          OP_1SUB
+          //convert the number to bits
+          OP_DUP
+          OP_0
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_1
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_2
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_3
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_4
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_5
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_6
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_7
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DROP
+          //shift right by 6 bits
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+      OP_ELSE
+          //clean up the stack and return true
+          OP_DROP
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_2DROP
+          OP_2DROP
+          OP_2DROP
+          OP_1
+      OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+OP_ENDIF
+//process instruction
+OP_DEPTH
+OP_1
+OP_GREATERTHAN
+OP_IF
+   OP_3DUP
+   OP_2DUP
+   OP_BOOLAND
+   OP_IF
+     OP_2DROP
+     OP_3
+   OP_ELSE
+     OP_IF
+         OP_1
+         OP_SWAP
+         OP_DROP
+     OP_ELSE
+         OP_IF
+             OP_2
+         OP_ELSE
+             OP_0
+         OP_ENDIF
+     OP_ENDIF
+   OP_ENDIF
+   OP_SWAP
+   OP_IF
+     OP_4
+   OP_ELSE
+     OP_0
+   OP_ENDIF
+   OP_ADD
+   //if 0, shift left by 6
+   OP_DUP
+   OP_0
+   OP_EQUAL
+   OP_IF
+      OP_DROP
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+   OP_ELSE
+   OP_DUP
+   OP_IF
+   //if 1, convert the next 3 bits to a number, and if that number is more 0, reduce it by 1, then shift right by 6 bits, otherwise clean up the stack and return true
+   OP_DUP
+   OP_1
+   OP_EQUAL
+   OP_IF
+      //convert the next 3 bits to a number
+      OP_DROP
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_2DUP
+      OP_BOOLAND
+      OP_IF
+      OP_2DROP
+      OP_3
+      OP_ELSE
+      OP_IF
+          OP_1
+          OP_SWAP
+          OP_DROP
+      OP_ELSE
+          OP_IF
+              OP_2
+          OP_ELSE
+              OP_0
+          OP_ENDIF
+      OP_ENDIF
+      OP_ENDIF
+      OP_SWAP
+      OP_IF
+      OP_4
+      OP_ELSE
+      OP_0
+      OP_ENDIF
+      OP_ADD
+      //if greater than 0, subtract 1, convert the number to bits, then shift right by 6 bits
+      OP_DUP
+      OP_0
+      OP_GREATERTHAN
+      OP_IF
+          //subtract 1
+          OP_1SUB
+          //convert the number to bits
+          OP_DUP
+          OP_0
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_1
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_2
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_3
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_4
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_5
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_6
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_7
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DROP
+          //shift right by 6 bits
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+      OP_ELSE
+          //clean up the stack and return true
+          OP_DROP
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_2DROP
+          OP_2DROP
+          OP_2DROP
+          OP_1
+      OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+OP_ENDIF
+//process instruction
+OP_DEPTH
+OP_1
+OP_GREATERTHAN
+OP_IF
+   OP_3DUP
+   OP_2DUP
+   OP_BOOLAND
+   OP_IF
+     OP_2DROP
+     OP_3
+   OP_ELSE
+     OP_IF
+         OP_1
+         OP_SWAP
+         OP_DROP
+     OP_ELSE
+         OP_IF
+             OP_2
+         OP_ELSE
+             OP_0
+         OP_ENDIF
+     OP_ENDIF
+   OP_ENDIF
+   OP_SWAP
+   OP_IF
+     OP_4
+   OP_ELSE
+     OP_0
+   OP_ENDIF
+   OP_ADD
+   //if 0, shift left by 6
+   OP_DUP
+   OP_0
+   OP_EQUAL
+   OP_IF
+      OP_DROP
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+   OP_ELSE
+   OP_DUP
+   OP_IF
+   //if 1, convert the next 3 bits to a number, and if that number is more 0, reduce it by 1, then shift right by 6 bits, otherwise clean up the stack and return true
+   OP_DUP
+   OP_1
+   OP_EQUAL
+   OP_IF
+      //convert the next 3 bits to a number
+      OP_DROP
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_2DUP
+      OP_BOOLAND
+      OP_IF
+      OP_2DROP
+      OP_3
+      OP_ELSE
+      OP_IF
+          OP_1
+          OP_SWAP
+          OP_DROP
+      OP_ELSE
+          OP_IF
+              OP_2
+          OP_ELSE
+              OP_0
+          OP_ENDIF
+      OP_ENDIF
+      OP_ENDIF
+      OP_SWAP
+      OP_IF
+      OP_4
+      OP_ELSE
+      OP_0
+      OP_ENDIF
+      OP_ADD
+      //if greater than 0, subtract 1, convert the number to bits, then shift right by 6 bits
+      OP_DUP
+      OP_0
+      OP_GREATERTHAN
+      OP_IF
+          //subtract 1
+          OP_1SUB
+          //convert the number to bits
+          OP_DUP
+          OP_0
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_1
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_2
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_3
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_4
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_5
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_6
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_7
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DROP
+          //shift right by 6 bits
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+      OP_ELSE
+          //clean up the stack and return true
+          OP_DROP
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_2DROP
+          OP_2DROP
+          OP_2DROP
+          OP_1
+      OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+OP_ENDIF
+//process instruction
+OP_DEPTH
+OP_1
+OP_GREATERTHAN
+OP_IF
+   OP_3DUP
+   OP_2DUP
+   OP_BOOLAND
+   OP_IF
+     OP_2DROP
+     OP_3
+   OP_ELSE
+     OP_IF
+         OP_1
+         OP_SWAP
+         OP_DROP
+     OP_ELSE
+         OP_IF
+             OP_2
+         OP_ELSE
+             OP_0
+         OP_ENDIF
+     OP_ENDIF
+   OP_ENDIF
+   OP_SWAP
+   OP_IF
+     OP_4
+   OP_ELSE
+     OP_0
+   OP_ENDIF
+   OP_ADD
+   //if 0, shift left by 6
+   OP_DUP
+   OP_0
+   OP_EQUAL
+   OP_IF
+      OP_DROP
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+   OP_ELSE
+   OP_DUP
+   OP_IF
+   //if 1, convert the next 3 bits to a number, and if that number is more 0, reduce it by 1, then shift right by 6 bits, otherwise clean up the stack and return true
+   OP_DUP
+   OP_1
+   OP_EQUAL
+   OP_IF
+      //convert the next 3 bits to a number
+      OP_DROP
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_2DUP
+      OP_BOOLAND
+      OP_IF
+      OP_2DROP
+      OP_3
+      OP_ELSE
+      OP_IF
+          OP_1
+          OP_SWAP
+          OP_DROP
+      OP_ELSE
+          OP_IF
+              OP_2
+          OP_ELSE
+              OP_0
+          OP_ENDIF
+      OP_ENDIF
+      OP_ENDIF
+      OP_SWAP
+      OP_IF
+      OP_4
+      OP_ELSE
+      OP_0
+      OP_ENDIF
+      OP_ADD
+      //if greater than 0, subtract 1, convert the number to bits, then shift right by 6 bits
+      OP_DUP
+      OP_0
+      OP_GREATERTHAN
+      OP_IF
+          //subtract 1
+          OP_1SUB
+          //convert the number to bits
+          OP_DUP
+          OP_0
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_1
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_2
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_3
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_4
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_5
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_6
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_7
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DROP
+          //shift right by 6 bits
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+      OP_ELSE
+          //clean up the stack and return true
+          OP_DROP
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_2DROP
+          OP_2DROP
+          OP_2DROP
+          OP_1
+      OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+OP_ENDIF
+//process instruction
+OP_DEPTH
+OP_1
+OP_GREATERTHAN
+OP_IF
+   OP_3DUP
+   OP_2DUP
+   OP_BOOLAND
+   OP_IF
+     OP_2DROP
+     OP_3
+   OP_ELSE
+     OP_IF
+         OP_1
+         OP_SWAP
+         OP_DROP
+     OP_ELSE
+         OP_IF
+             OP_2
+         OP_ELSE
+             OP_0
+         OP_ENDIF
+     OP_ENDIF
+   OP_ENDIF
+   OP_SWAP
+   OP_IF
+     OP_4
+   OP_ELSE
+     OP_0
+   OP_ENDIF
+   OP_ADD
+   //if 0, shift left by 6
+   OP_DUP
+   OP_0
+   OP_EQUAL
+   OP_IF
+      OP_DROP
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+   OP_ELSE
+   OP_DUP
+   OP_IF
+   //if 1, convert the next 3 bits to a number, and if that number is more 0, reduce it by 1, then shift right by 6 bits, otherwise clean up the stack and return true
+   OP_DUP
+   OP_1
+   OP_EQUAL
+   OP_IF
+      //convert the next 3 bits to a number
+      OP_DROP
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_2DUP
+      OP_BOOLAND
+      OP_IF
+      OP_2DROP
+      OP_3
+      OP_ELSE
+      OP_IF
+          OP_1
+          OP_SWAP
+          OP_DROP
+      OP_ELSE
+          OP_IF
+              OP_2
+          OP_ELSE
+              OP_0
+          OP_ENDIF
+      OP_ENDIF
+      OP_ENDIF
+      OP_SWAP
+      OP_IF
+      OP_4
+      OP_ELSE
+      OP_0
+      OP_ENDIF
+      OP_ADD
+      //if greater than 0, subtract 1, convert the number to bits, then shift right by 6 bits
+      OP_DUP
+      OP_0
+      OP_GREATERTHAN
+      OP_IF
+          //subtract 1
+          OP_1SUB
+          //convert the number to bits
+          OP_DUP
+          OP_0
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_1
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_2
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_3
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_4
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_5
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_6
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_7
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DROP
+          //shift right by 6 bits
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+      OP_ELSE
+          //clean up the stack and return true
+          OP_DROP
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_2DROP
+          OP_2DROP
+          OP_2DROP
+          OP_1
+      OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+OP_ENDIF
+//process instruction
+OP_DEPTH
+OP_1
+OP_GREATERTHAN
+OP_IF
+   OP_3DUP
+   OP_2DUP
+   OP_BOOLAND
+   OP_IF
+     OP_2DROP
+     OP_3
+   OP_ELSE
+     OP_IF
+         OP_1
+         OP_SWAP
+         OP_DROP
+     OP_ELSE
+         OP_IF
+             OP_2
+         OP_ELSE
+             OP_0
+         OP_ENDIF
+     OP_ENDIF
+   OP_ENDIF
+   OP_SWAP
+   OP_IF
+     OP_4
+   OP_ELSE
+     OP_0
+   OP_ENDIF
+   OP_ADD
+   //if 0, shift left by 6
+   OP_DUP
+   OP_0
+   OP_EQUAL
+   OP_IF
+      OP_DROP
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+   OP_ELSE
+   OP_DUP
+   OP_IF
+   //if 1, convert the next 3 bits to a number, and if that number is more 0, reduce it by 1, then shift right by 6 bits, otherwise clean up the stack and return true
+   OP_DUP
+   OP_1
+   OP_EQUAL
+   OP_IF
+      //convert the next 3 bits to a number
+      OP_DROP
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_2DUP
+      OP_BOOLAND
+      OP_IF
+      OP_2DROP
+      OP_3
+      OP_ELSE
+      OP_IF
+          OP_1
+          OP_SWAP
+          OP_DROP
+      OP_ELSE
+          OP_IF
+              OP_2
+          OP_ELSE
+              OP_0
+          OP_ENDIF
+      OP_ENDIF
+      OP_ENDIF
+      OP_SWAP
+      OP_IF
+      OP_4
+      OP_ELSE
+      OP_0
+      OP_ENDIF
+      OP_ADD
+      //if greater than 0, subtract 1, convert the number to bits, then shift right by 6 bits
+      OP_DUP
+      OP_0
+      OP_GREATERTHAN
+      OP_IF
+          //subtract 1
+          OP_1SUB
+          //convert the number to bits
+          OP_DUP
+          OP_0
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_1
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_2
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_3
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_4
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_5
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_6
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_7
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DROP
+          //shift right by 6 bits
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+      OP_ELSE
+          //clean up the stack and return true
+          OP_DROP
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_2DROP
+          OP_2DROP
+          OP_2DROP
+          OP_1
+      OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+OP_ENDIF
+//process instruction
+OP_DEPTH
+OP_1
+OP_GREATERTHAN
+OP_IF
+   OP_3DUP
+   OP_2DUP
+   OP_BOOLAND
+   OP_IF
+     OP_2DROP
+     OP_3
+   OP_ELSE
+     OP_IF
+         OP_1
+         OP_SWAP
+         OP_DROP
+     OP_ELSE
+         OP_IF
+             OP_2
+         OP_ELSE
+             OP_0
+         OP_ENDIF
+     OP_ENDIF
+   OP_ENDIF
+   OP_SWAP
+   OP_IF
+     OP_4
+   OP_ELSE
+     OP_0
+   OP_ENDIF
+   OP_ADD
+   //if 0, shift left by 6
+   OP_DUP
+   OP_0
+   OP_EQUAL
+   OP_IF
+      OP_DROP
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+   OP_ELSE
+   OP_DUP
+   OP_IF
+   //if 1, convert the next 3 bits to a number, and if that number is more 0, reduce it by 1, then shift right by 6 bits, otherwise clean up the stack and return true
+   OP_DUP
+   OP_1
+   OP_EQUAL
+   OP_IF
+      //convert the next 3 bits to a number
+      OP_DROP
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_2DUP
+      OP_BOOLAND
+      OP_IF
+      OP_2DROP
+      OP_3
+      OP_ELSE
+      OP_IF
+          OP_1
+          OP_SWAP
+          OP_DROP
+      OP_ELSE
+          OP_IF
+              OP_2
+          OP_ELSE
+              OP_0
+          OP_ENDIF
+      OP_ENDIF
+      OP_ENDIF
+      OP_SWAP
+      OP_IF
+      OP_4
+      OP_ELSE
+      OP_0
+      OP_ENDIF
+      OP_ADD
+      //if greater than 0, subtract 1, convert the number to bits, then shift right by 6 bits
+      OP_DUP
+      OP_0
+      OP_GREATERTHAN
+      OP_IF
+          //subtract 1
+          OP_1SUB
+          //convert the number to bits
+          OP_DUP
+          OP_0
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_1
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_2
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_3
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_4
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_5
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_6
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_7
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DROP
+          //shift right by 6 bits
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+      OP_ELSE
+          //clean up the stack and return true
+          OP_DROP
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_2DROP
+          OP_2DROP
+          OP_2DROP
+          OP_1
+      OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+OP_ENDIF
+//process instruction
+OP_DEPTH
+OP_1
+OP_GREATERTHAN
+OP_IF
+   OP_3DUP
+   OP_2DUP
+   OP_BOOLAND
+   OP_IF
+     OP_2DROP
+     OP_3
+   OP_ELSE
+     OP_IF
+         OP_1
+         OP_SWAP
+         OP_DROP
+     OP_ELSE
+         OP_IF
+             OP_2
+         OP_ELSE
+             OP_0
+         OP_ENDIF
+     OP_ENDIF
+   OP_ENDIF
+   OP_SWAP
+   OP_IF
+     OP_4
+   OP_ELSE
+     OP_0
+   OP_ENDIF
+   OP_ADD
+   //if 0, shift left by 6
+   OP_DUP
+   OP_0
+   OP_EQUAL
+   OP_IF
+      OP_DROP
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+   OP_ELSE
+   OP_DUP
+   OP_IF
+   //if 1, convert the next 3 bits to a number, and if that number is more 0, reduce it by 1, then shift right by 6 bits, otherwise clean up the stack and return true
+   OP_DUP
+   OP_1
+   OP_EQUAL
+   OP_IF
+      //convert the next 3 bits to a number
+      OP_DROP
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_2DUP
+      OP_BOOLAND
+      OP_IF
+      OP_2DROP
+      OP_3
+      OP_ELSE
+      OP_IF
+          OP_1
+          OP_SWAP
+          OP_DROP
+      OP_ELSE
+          OP_IF
+              OP_2
+          OP_ELSE
+              OP_0
+          OP_ENDIF
+      OP_ENDIF
+      OP_ENDIF
+      OP_SWAP
+      OP_IF
+      OP_4
+      OP_ELSE
+      OP_0
+      OP_ENDIF
+      OP_ADD
+      //if greater than 0, subtract 1, convert the number to bits, then shift right by 6 bits
+      OP_DUP
+      OP_0
+      OP_GREATERTHAN
+      OP_IF
+          //subtract 1
+          OP_1SUB
+          //convert the number to bits
+          OP_DUP
+          OP_0
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_1
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_2
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_3
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_4
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_5
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_6
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_7
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DROP
+          //shift right by 6 bits
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+      OP_ELSE
+          //clean up the stack and return true
+          OP_DROP
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_2DROP
+          OP_2DROP
+          OP_2DROP
+          OP_1
+      OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+OP_ENDIF
+//process instruction
+OP_DEPTH
+OP_1
+OP_GREATERTHAN
+OP_IF
+   OP_3DUP
+   OP_2DUP
+   OP_BOOLAND
+   OP_IF
+     OP_2DROP
+     OP_3
+   OP_ELSE
+     OP_IF
+         OP_1
+         OP_SWAP
+         OP_DROP
+     OP_ELSE
+         OP_IF
+             OP_2
+         OP_ELSE
+             OP_0
+         OP_ENDIF
+     OP_ENDIF
+   OP_ENDIF
+   OP_SWAP
+   OP_IF
+     OP_4
+   OP_ELSE
+     OP_0
+   OP_ENDIF
+   OP_ADD
+   //if 0, shift left by 6
+   OP_DUP
+   OP_0
+   OP_EQUAL
+   OP_IF
+      OP_DROP
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+   OP_ELSE
+   OP_DUP
+   OP_IF
+   //if 1, convert the next 3 bits to a number, and if that number is more 0, reduce it by 1, then shift right by 6 bits, otherwise clean up the stack and return true
+   OP_DUP
+   OP_1
+   OP_EQUAL
+   OP_IF
+      //convert the next 3 bits to a number
+      OP_DROP
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_2DUP
+      OP_BOOLAND
+      OP_IF
+      OP_2DROP
+      OP_3
+      OP_ELSE
+      OP_IF
+          OP_1
+          OP_SWAP
+          OP_DROP
+      OP_ELSE
+          OP_IF
+              OP_2
+          OP_ELSE
+              OP_0
+          OP_ENDIF
+      OP_ENDIF
+      OP_ENDIF
+      OP_SWAP
+      OP_IF
+      OP_4
+      OP_ELSE
+      OP_0
+      OP_ENDIF
+      OP_ADD
+      //if greater than 0, subtract 1, convert the number to bits, then shift right by 6 bits
+      OP_DUP
+      OP_0
+      OP_GREATERTHAN
+      OP_IF
+          //subtract 1
+          OP_1SUB
+          //convert the number to bits
+          OP_DUP
+          OP_0
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_1
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_2
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_3
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_4
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_5
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_6
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_7
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DROP
+          //shift right by 6 bits
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+      OP_ELSE
+          //clean up the stack and return true
+          OP_DROP
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_2DROP
+          OP_2DROP
+          OP_2DROP
+          OP_1
+      OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+OP_ENDIF
+//process instruction
+OP_DEPTH
+OP_1
+OP_GREATERTHAN
+OP_IF
+   OP_3DUP
+   OP_2DUP
+   OP_BOOLAND
+   OP_IF
+     OP_2DROP
+     OP_3
+   OP_ELSE
+     OP_IF
+         OP_1
+         OP_SWAP
+         OP_DROP
+     OP_ELSE
+         OP_IF
+             OP_2
+         OP_ELSE
+             OP_0
+         OP_ENDIF
+     OP_ENDIF
+   OP_ENDIF
+   OP_SWAP
+   OP_IF
+     OP_4
+   OP_ELSE
+     OP_0
+   OP_ENDIF
+   OP_ADD
+   //if 0, shift left by 6
+   OP_DUP
+   OP_0
+   OP_EQUAL
+   OP_IF
+      OP_DROP
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+   OP_ELSE
+   OP_DUP
+   OP_IF
+   //if 1, convert the next 3 bits to a number, and if that number is more 0, reduce it by 1, then shift right by 6 bits, otherwise clean up the stack and return true
+   OP_DUP
+   OP_1
+   OP_EQUAL
+   OP_IF
+      //convert the next 3 bits to a number
+      OP_DROP
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_2DUP
+      OP_BOOLAND
+      OP_IF
+      OP_2DROP
+      OP_3
+      OP_ELSE
+      OP_IF
+          OP_1
+          OP_SWAP
+          OP_DROP
+      OP_ELSE
+          OP_IF
+              OP_2
+          OP_ELSE
+              OP_0
+          OP_ENDIF
+      OP_ENDIF
+      OP_ENDIF
+      OP_SWAP
+      OP_IF
+      OP_4
+      OP_ELSE
+      OP_0
+      OP_ENDIF
+      OP_ADD
+      //if greater than 0, subtract 1, convert the number to bits, then shift right by 6 bits
+      OP_DUP
+      OP_0
+      OP_GREATERTHAN
+      OP_IF
+          //subtract 1
+          OP_1SUB
+          //convert the number to bits
+          OP_DUP
+          OP_0
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_1
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_2
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_3
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_4
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_5
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_6
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_7
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DROP
+          //shift right by 6 bits
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+      OP_ELSE
+          //clean up the stack and return true
+          OP_DROP
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_2DROP
+          OP_2DROP
+          OP_2DROP
+          OP_1
+      OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+OP_ENDIF
+//process instruction
+OP_DEPTH
+OP_1
+OP_GREATERTHAN
+OP_IF
+   OP_3DUP
+   OP_2DUP
+   OP_BOOLAND
+   OP_IF
+     OP_2DROP
+     OP_3
+   OP_ELSE
+     OP_IF
+         OP_1
+         OP_SWAP
+         OP_DROP
+     OP_ELSE
+         OP_IF
+             OP_2
+         OP_ELSE
+             OP_0
+         OP_ENDIF
+     OP_ENDIF
+   OP_ENDIF
+   OP_SWAP
+   OP_IF
+     OP_4
+   OP_ELSE
+     OP_0
+   OP_ENDIF
+   OP_ADD
+   //if 0, shift left by 6
+   OP_DUP
+   OP_0
+   OP_EQUAL
+   OP_IF
+      OP_DROP
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+   OP_ELSE
+   OP_DUP
+   OP_IF
+   //if 1, convert the next 3 bits to a number, and if that number is more 0, reduce it by 1, then shift right by 6 bits, otherwise clean up the stack and return true
+   OP_DUP
+   OP_1
+   OP_EQUAL
+   OP_IF
+      //convert the next 3 bits to a number
+      OP_DROP
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_2DUP
+      OP_BOOLAND
+      OP_IF
+      OP_2DROP
+      OP_3
+      OP_ELSE
+      OP_IF
+          OP_1
+          OP_SWAP
+          OP_DROP
+      OP_ELSE
+          OP_IF
+              OP_2
+          OP_ELSE
+              OP_0
+          OP_ENDIF
+      OP_ENDIF
+      OP_ENDIF
+      OP_SWAP
+      OP_IF
+      OP_4
+      OP_ELSE
+      OP_0
+      OP_ENDIF
+      OP_ADD
+      //if greater than 0, subtract 1, convert the number to bits, then shift right by 6 bits
+      OP_DUP
+      OP_0
+      OP_GREATERTHAN
+      OP_IF
+          //subtract 1
+          OP_1SUB
+          //convert the number to bits
+          OP_DUP
+          OP_0
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_1
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_2
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_3
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_4
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_5
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_6
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_7
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DROP
+          //shift right by 6 bits
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+      OP_ELSE
+          //clean up the stack and return true
+          OP_DROP
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_2DROP
+          OP_2DROP
+          OP_2DROP
+          OP_1
+      OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+OP_ENDIF
+//process instruction
+OP_DEPTH
+OP_1
+OP_GREATERTHAN
+OP_IF
+   OP_3DUP
+   OP_2DUP
+   OP_BOOLAND
+   OP_IF
+     OP_2DROP
+     OP_3
+   OP_ELSE
+     OP_IF
+         OP_1
+         OP_SWAP
+         OP_DROP
+     OP_ELSE
+         OP_IF
+             OP_2
+         OP_ELSE
+             OP_0
+         OP_ENDIF
+     OP_ENDIF
+   OP_ENDIF
+   OP_SWAP
+   OP_IF
+     OP_4
+   OP_ELSE
+     OP_0
+   OP_ENDIF
+   OP_ADD
+   //if 0, shift left by 6
+   OP_DUP
+   OP_0
+   OP_EQUAL
+   OP_IF
+      OP_DROP
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+   OP_ELSE
+   OP_DUP
+   OP_IF
+   //if 1, convert the next 3 bits to a number, and if that number is more 0, reduce it by 1, then shift right by 6 bits, otherwise clean up the stack and return true
+   OP_DUP
+   OP_1
+   OP_EQUAL
+   OP_IF
+      //convert the next 3 bits to a number
+      OP_DROP
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_2DUP
+      OP_BOOLAND
+      OP_IF
+      OP_2DROP
+      OP_3
+      OP_ELSE
+      OP_IF
+          OP_1
+          OP_SWAP
+          OP_DROP
+      OP_ELSE
+          OP_IF
+              OP_2
+          OP_ELSE
+              OP_0
+          OP_ENDIF
+      OP_ENDIF
+      OP_ENDIF
+      OP_SWAP
+      OP_IF
+      OP_4
+      OP_ELSE
+      OP_0
+      OP_ENDIF
+      OP_ADD
+      //if greater than 0, subtract 1, convert the number to bits, then shift right by 6 bits
+      OP_DUP
+      OP_0
+      OP_GREATERTHAN
+      OP_IF
+          //subtract 1
+          OP_1SUB
+          //convert the number to bits
+          OP_DUP
+          OP_0
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_1
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_2
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_3
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_4
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_5
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_6
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_7
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DROP
+          //shift right by 6 bits
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+      OP_ELSE
+          //clean up the stack and return true
+          OP_DROP
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_2DROP
+          OP_2DROP
+          OP_2DROP
+          OP_1
+      OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+OP_ENDIF
+//process instruction
+OP_DEPTH
+OP_1
+OP_GREATERTHAN
+OP_IF
+   OP_3DUP
+   OP_2DUP
+   OP_BOOLAND
+   OP_IF
+     OP_2DROP
+     OP_3
+   OP_ELSE
+     OP_IF
+         OP_1
+         OP_SWAP
+         OP_DROP
+     OP_ELSE
+         OP_IF
+             OP_2
+         OP_ELSE
+             OP_0
+         OP_ENDIF
+     OP_ENDIF
+   OP_ENDIF
+   OP_SWAP
+   OP_IF
+     OP_4
+   OP_ELSE
+     OP_0
+   OP_ENDIF
+   OP_ADD
+   //if 0, shift left by 6
+   OP_DUP
+   OP_0
+   OP_EQUAL
+   OP_IF
+      OP_DROP
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+   OP_ELSE
+   OP_DUP
+   OP_IF
+   //if 1, convert the next 3 bits to a number, and if that number is more 0, reduce it by 1, then shift right by 6 bits, otherwise clean up the stack and return true
+   OP_DUP
+   OP_1
+   OP_EQUAL
+   OP_IF
+      //convert the next 3 bits to a number
+      OP_DROP
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_2DUP
+      OP_BOOLAND
+      OP_IF
+      OP_2DROP
+      OP_3
+      OP_ELSE
+      OP_IF
+          OP_1
+          OP_SWAP
+          OP_DROP
+      OP_ELSE
+          OP_IF
+              OP_2
+          OP_ELSE
+              OP_0
+          OP_ENDIF
+      OP_ENDIF
+      OP_ENDIF
+      OP_SWAP
+      OP_IF
+      OP_4
+      OP_ELSE
+      OP_0
+      OP_ENDIF
+      OP_ADD
+      //if greater than 0, subtract 1, convert the number to bits, then shift right by 6 bits
+      OP_DUP
+      OP_0
+      OP_GREATERTHAN
+      OP_IF
+          //subtract 1
+          OP_1SUB
+          //convert the number to bits
+          OP_DUP
+          OP_0
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_1
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_2
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_3
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_4
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_5
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_6
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_7
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DROP
+          //shift right by 6 bits
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+      OP_ELSE
+          //clean up the stack and return true
+          OP_DROP
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_2DROP
+          OP_2DROP
+          OP_2DROP
+          OP_1
+      OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+OP_ENDIF
+//process instruction
+OP_DEPTH
+OP_1
+OP_GREATERTHAN
+OP_IF
+   OP_3DUP
+   OP_2DUP
+   OP_BOOLAND
+   OP_IF
+     OP_2DROP
+     OP_3
+   OP_ELSE
+     OP_IF
+         OP_1
+         OP_SWAP
+         OP_DROP
+     OP_ELSE
+         OP_IF
+             OP_2
+         OP_ELSE
+             OP_0
+         OP_ENDIF
+     OP_ENDIF
+   OP_ENDIF
+   OP_SWAP
+   OP_IF
+     OP_4
+   OP_ELSE
+     OP_0
+   OP_ENDIF
+   OP_ADD
+   //if 0, shift left by 6
+   OP_DUP
+   OP_0
+   OP_EQUAL
+   OP_IF
+      OP_DROP
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+   OP_ELSE
+   OP_DUP
+   OP_IF
+   //if 1, convert the next 3 bits to a number, and if that number is more 0, reduce it by 1, then shift right by 6 bits, otherwise clean up the stack and return true
+   OP_DUP
+   OP_1
+   OP_EQUAL
+   OP_IF
+      //convert the next 3 bits to a number
+      OP_DROP
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_2DUP
+      OP_BOOLAND
+      OP_IF
+      OP_2DROP
+      OP_3
+      OP_ELSE
+      OP_IF
+          OP_1
+          OP_SWAP
+          OP_DROP
+      OP_ELSE
+          OP_IF
+              OP_2
+          OP_ELSE
+              OP_0
+          OP_ENDIF
+      OP_ENDIF
+      OP_ENDIF
+      OP_SWAP
+      OP_IF
+      OP_4
+      OP_ELSE
+      OP_0
+      OP_ENDIF
+      OP_ADD
+      //if greater than 0, subtract 1, convert the number to bits, then shift right by 6 bits
+      OP_DUP
+      OP_0
+      OP_GREATERTHAN
+      OP_IF
+          //subtract 1
+          OP_1SUB
+          //convert the number to bits
+          OP_DUP
+          OP_0
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_1
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_2
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_3
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_4
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_5
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_6
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_7
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DROP
+          //shift right by 6 bits
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+      OP_ELSE
+          //clean up the stack and return true
+          OP_DROP
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_2DROP
+          OP_2DROP
+          OP_2DROP
+          OP_1
+      OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+OP_ENDIF
+//process instruction
+OP_DEPTH
+OP_1
+OP_GREATERTHAN
+OP_IF
+   OP_3DUP
+   OP_2DUP
+   OP_BOOLAND
+   OP_IF
+     OP_2DROP
+     OP_3
+   OP_ELSE
+     OP_IF
+         OP_1
+         OP_SWAP
+         OP_DROP
+     OP_ELSE
+         OP_IF
+             OP_2
+         OP_ELSE
+             OP_0
+         OP_ENDIF
+     OP_ENDIF
+   OP_ENDIF
+   OP_SWAP
+   OP_IF
+     OP_4
+   OP_ELSE
+     OP_0
+   OP_ENDIF
+   OP_ADD
+   //if 0, shift left by 6
+   OP_DUP
+   OP_0
+   OP_EQUAL
+   OP_IF
+      OP_DROP
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+   OP_ELSE
+   OP_DUP
+   OP_IF
+   //if 1, convert the next 3 bits to a number, and if that number is more 0, reduce it by 1, then shift right by 6 bits, otherwise clean up the stack and return true
+   OP_DUP
+   OP_1
+   OP_EQUAL
+   OP_IF
+      //convert the next 3 bits to a number
+      OP_DROP
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_2DUP
+      OP_BOOLAND
+      OP_IF
+      OP_2DROP
+      OP_3
+      OP_ELSE
+      OP_IF
+          OP_1
+          OP_SWAP
+          OP_DROP
+      OP_ELSE
+          OP_IF
+              OP_2
+          OP_ELSE
+              OP_0
+          OP_ENDIF
+      OP_ENDIF
+      OP_ENDIF
+      OP_SWAP
+      OP_IF
+      OP_4
+      OP_ELSE
+      OP_0
+      OP_ENDIF
+      OP_ADD
+      //if greater than 0, subtract 1, convert the number to bits, then shift right by 6 bits
+      OP_DUP
+      OP_0
+      OP_GREATERTHAN
+      OP_IF
+          //subtract 1
+          OP_1SUB
+          //convert the number to bits
+          OP_DUP
+          OP_0
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_1
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_2
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_3
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_4
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_5
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_6
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_7
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DROP
+          //shift right by 6 bits
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+      OP_ELSE
+          //clean up the stack and return true
+          OP_DROP
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_2DROP
+          OP_2DROP
+          OP_2DROP
+          OP_1
+      OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+OP_ENDIF
+//process instruction
+OP_DEPTH
+OP_1
+OP_GREATERTHAN
+OP_IF
+   OP_3DUP
+   OP_2DUP
+   OP_BOOLAND
+   OP_IF
+     OP_2DROP
+     OP_3
+   OP_ELSE
+     OP_IF
+         OP_1
+         OP_SWAP
+         OP_DROP
+     OP_ELSE
+         OP_IF
+             OP_2
+         OP_ELSE
+             OP_0
+         OP_ENDIF
+     OP_ENDIF
+   OP_ENDIF
+   OP_SWAP
+   OP_IF
+     OP_4
+   OP_ELSE
+     OP_0
+   OP_ENDIF
+   OP_ADD
+   //if 0, shift left by 6
+   OP_DUP
+   OP_0
+   OP_EQUAL
+   OP_IF
+      OP_DROP
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+      OP_TOALTSTACK
+   OP_ELSE
+   OP_DUP
+   OP_IF
+   //if 1, convert the next 3 bits to a number, and if that number is more 0, reduce it by 1, then shift right by 6 bits, otherwise clean up the stack and return true
+   OP_DUP
+   OP_1
+   OP_EQUAL
+   OP_IF
+      //convert the next 3 bits to a number
+      OP_DROP
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_FROMALTSTACK
+      OP_2DUP
+      OP_BOOLAND
+      OP_IF
+      OP_2DROP
+      OP_3
+      OP_ELSE
+      OP_IF
+          OP_1
+          OP_SWAP
+          OP_DROP
+      OP_ELSE
+          OP_IF
+              OP_2
+          OP_ELSE
+              OP_0
+          OP_ENDIF
+      OP_ENDIF
+      OP_ENDIF
+      OP_SWAP
+      OP_IF
+      OP_4
+      OP_ELSE
+      OP_0
+      OP_ENDIF
+      OP_ADD
+      //if greater than 0, subtract 1, convert the number to bits, then shift right by 6 bits
+      OP_DUP
+      OP_0
+      OP_GREATERTHAN
+      OP_IF
+          //subtract 1
+          OP_1SUB
+          //convert the number to bits
+          OP_DUP
+          OP_0
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_1
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_2
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_3
+          OP_EQUAL
+          OP_IF
+              OP_0
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_4
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_5
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_0
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_6
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_0
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DUP
+          OP_7
+          OP_EQUAL
+          OP_IF
+              OP_1
+              OP_1
+              OP_1
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+              OP_TOALTSTACK
+          OP_ENDIF
+          OP_DROP
+          //shift right by 6 bits
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+      OP_ELSE
+          //clean up the stack and return true
+          OP_DROP
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_FROMALTSTACK
+          OP_2DROP
+          OP_2DROP
+          OP_2DROP
+          OP_1
+      OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+   OP_ENDIF
+OP_ENDIF
+```
+
+# Conclusion
+
+To conclude, I want to point out a few things:
+
+(1) This particular script can loop a maximum of 7 times but that limit can be raised by increasing the size of the virtual machine, and thus paying a higher bitcoin mining fee
+
+(2) The loop function does not do anything useful, it just decrements a number, but it absolutely can! Other bitcoin developers can use this principle to use any set of bitcoin script functions inside their loops
+
+(3) My virtual machine only uses 2 commands out of a possible 8 that I could have implemented but chose not to. Other bitcoin developers can make their scripts much more expressive by using the other leftover instruction blocks that I did not use, and by using a longer tape
